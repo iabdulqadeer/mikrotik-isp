@@ -7,50 +7,63 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
-        Schema::table('ticket_messages', function (Blueprint $table) {
-            // Add owner_id (same owner as parent ticket)
+        // 1) Add owner_id (nullable), index, and FK with an explicit name
+        Schema::table('ticket_messages', function (Blueprint $t) {
             if (!Schema::hasColumn('ticket_messages', 'owner_id')) {
-                $table->unsignedBigInteger('owner_id')->after('id');
-                $table->index('owner_id', 'ticket_messages_owner_id_index');
-                $table->foreign('owner_id')->references('id')->on('users')->cascadeOnDelete();
+                $t->unsignedBigInteger('owner_id')->nullable()->after('id');
+                $t->index('owner_id', 'ticket_messages_owner_id_index');
             }
+        });
 
-            // Ensure attachments is JSON (nullable)
+        Schema::table('ticket_messages', function (Blueprint $t) {
+            // Only add the FK if it doesn't already exist in this exact name
+            // (Laravel doesn't expose FK-exists, so we just try and ignore if present)
+            try {
+                $t->foreign('owner_id', 'fk_ticket_messages_owner_id')
+                  ->references('id')->on('users')
+                  ->onDelete('set null');
+            } catch (\Throwable $e) {
+                // ignore if already exists
+            }
+        });
+
+        // 2) Ensure attachments is JSON (nullable), and place it after 'body'
+        Schema::table('ticket_messages', function (Blueprint $t) {
+            $afterCol = Schema::hasColumn('ticket_messages', 'body') ? 'body' : 'id';
+
             if (Schema::hasColumn('ticket_messages', 'attachments')) {
-                // Change to JSON if not already (not all DBs support "change" reliably)
+                // Convert to JSON if needed; not all DBs support change() smoothly, so try/catch
                 try {
-                    $table->json('attachments')->nullable()->change();
+                    $t->json('attachments')->nullable()->change();
                 } catch (\Throwable $e) {
-                    // Fallback: drop & re-add as json
-                    try { $table->dropColumn('attachments'); } catch (\Throwable $ex) {}
-                    $table->json('attachments')->nullable()->after('body');
+                    try { $t->dropColumn('attachments'); } catch (\Throwable $ex) {}
+                    $t->json('attachments')->nullable()->after($afterCol);
                 }
             } else {
-                $table->json('attachments')->nullable()->after('body');
+                $t->json('attachments')->nullable()->after($afterCol);
             }
-
-            // Add missing FKs if needed
-            try { $table->foreign('ticket_id')->references('id')->on('tickets')->cascadeOnDelete(); } catch (\Throwable $e) {}
-            try { $table->foreign('user_id')->references('id')->on('users')->cascadeOnDelete(); } catch (\Throwable $e) {}
         });
+
+        // IMPORTANT: We do NOT touch ticket_id/user_id FKs here.
+        // They are defined in the base migration with explicit names already.
     }
 
     public function down(): void
     {
-        Schema::table('ticket_messages', function (Blueprint $table) {
-            try { $table->dropForeign(['owner_id']); } catch (\Throwable $e) {}
-            try { $table->dropIndex('ticket_messages_owner_id_index'); } catch (\Throwable $e) {}
-            if (Schema::hasColumn('ticket_messages','owner_id')) {
-                $table->dropColumn('owner_id');
+        Schema::table('ticket_messages', function (Blueprint $t) {
+            // Drop our explicit owner FK and index if present
+            try { $t->dropForeign('fk_ticket_messages_owner_id'); } catch (\Throwable $e) {}
+            try { $t->dropIndex('ticket_messages_owner_id_index'); } catch (\Throwable $e) {}
+
+            // Drop the column if present
+            if (Schema::hasColumn('ticket_messages', 'owner_id')) {
+                try { $t->dropColumn('owner_id'); } catch (\Throwable $e) {}
             }
 
-            // Keep attachments as json; if you must revert, uncomment:
-            // try { $table->dropColumn('attachments'); } catch (\Throwable $e) {}
-            // $table->text('attachments')->nullable();
-
-            // Drop optional FKs
-            try { $table->dropForeign(['ticket_id']); } catch (\Throwable $e) {}
-            try { $table->dropForeign(['user_id']); } catch (\Throwable $e) {}
+            // We leave attachments as-is (JSON). If you need to revert, uncomment:
+            // if (Schema::hasColumn('ticket_messages', 'attachments')) {
+            //     try { $t->dropColumn('attachments'); } catch (\Throwable $e) {}
+            // }
         });
     }
 };

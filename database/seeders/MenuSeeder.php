@@ -6,6 +6,7 @@ use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use App\Models\Menu;
 use Spatie\Permission\Models\Role;
+use Illuminate\Support\Facades\Schema;
 
 class MenuSeeder extends Seeder
 {
@@ -14,8 +15,10 @@ class MenuSeeder extends Seeder
         $guard = config('auth.defaults.guard','web');
 
         // ---- (optional but recommended once) clean reset to avoid stale self-parent rows
+        Schema::disableForeignKeyConstraints();
         DB::table('menu_role')->truncate();
         Menu::truncate();
+        Schema::enableForeignKeyConstraints();
 
         // Ensure roles exist
         foreach (['admin','operator','support','accountant','viewer','user'] as $r) {
